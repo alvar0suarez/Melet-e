@@ -646,7 +646,7 @@ if _dist.exists() and _index.exists():
 
     # SPA fallback — must be defined LAST so API routes take priority
     @app.get("/{full_path:path}")
-    def serve_spa(full_path: str, _: None = Depends(require_auth)):
+    def serve_spa(full_path: str):
         """Serve index.html for all non-API routes (SPA client-side routing)."""
         return FileResponse(str(_index))
 else:
