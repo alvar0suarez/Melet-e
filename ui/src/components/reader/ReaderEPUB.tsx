@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useReaderStore } from '@/store/reader'
 import { useAppStore } from '@/store/app'
-import { loadEpub, aiChat, listVocabWords, loadAnnotations } from '@/lib/api'
+import { loadEpub, listVocabWords, loadAnnotations, aiChat } from '@/lib/api'
 import ReaderToolbar from './ReaderToolbar'
 import AnnotationsPanel from './AnnotationsPanel'
 import ReaderNotePanel from './ReaderNotePanel'
 import WordPopup from './WordPopup'
+import { EpubDocSearch } from './DocSearchPanel'
 import type { EpubChapter, EpubBlock, Annotation } from '@/lib/types'
 
 interface Props {
@@ -27,16 +28,10 @@ const HEADING_FG: Record<string, string> = {
 
 // ── Highlight colors ──────────────────────────────────────────────────────────
 const HIGHLIGHT_BG: Record<string, string> = {
-  red:    'rgba(239,68,68,0.45)',
-  yellow: 'rgba(245,158,11,0.55)',
-  green:  'rgba(34,197,94,0.42)',
-  grey:   'rgba(156,163,175,0.38)',
-}
-const HIGHLIGHT_COLOR: Record<string, string> = {
-  red:    '#1a0505',
-  yellow: '#1a1200',
-  green:  '#03170a',
-  grey:   '#111214',
+  red:    'rgba(239,68,68,0.5)',
+  yellow: 'rgba(245,158,11,0.6)',
+  green:  'rgba(34,197,94,0.45)',
+  grey:   'rgba(156,163,175,0.4)',
 }
 
 // ── Text segmentation ─────────────────────────────────────────────────────────
@@ -56,6 +51,7 @@ function buildSegments(
 ): Segment[] {
   // Normalize whitespace so multi-line browser selections match block text
   const text = rawText.replace(/\s+/g, ' ')
+  const textLower = text.toLowerCase()
 
   type Range = {
     start: number; end: number
@@ -64,13 +60,14 @@ function buildSegments(
   }
   const ranges: Range[] = []
 
-  // Highlight ranges (normalized, case-sensitive)
+  // Highlight ranges (normalized, case-insensitive)
   for (const ann of annotations) {
     if (!ann.text) continue
     const needle = ann.text.replace(/\s+/g, ' ').trim()
+    const needleLower = needle.toLowerCase()
     let idx = 0
     while (true) {
-      const pos = text.indexOf(needle, idx)
+      const pos = textLower.indexOf(needleLower, idx)
       if (pos === -1) break
       ranges.push({ start: pos, end: pos + needle.length, kind: 'highlight', color: ann.color })
       idx = pos + 1
@@ -117,28 +114,6 @@ function buildSegments(
   }
   if (pos < text.length) segs.push({ kind: 'text', text: text.slice(pos) })
   return segs
-}
-
-// ── AI translation ────────────────────────────────────────────────────────────
-async function translateBlocks(
-  blocks: EpubBlock[],
-  aiConfig: Parameters<typeof aiChat>[1]
-): Promise<EpubBlock[]> {
-  const combined = blocks.map((b, i) => `[${i}|${b.type}] ${b.text}`).join('\n')
-  const prompt =
-    `Translate the following ebook content to Spanish. Preserve the format tags exactly (e.g. [0|h1], [1|p]). ` +
-    `Return ONLY the translated lines with the same tags, one per line:\n\n${combined}`
-  const { response } = await aiChat([{ role: 'user', content: prompt }], aiConfig ?? undefined)
-  const lines = response.split('\n').filter(Boolean)
-  const result: EpubBlock[] = [...blocks]
-  for (const line of lines) {
-    const m = line.match(/^\[(\d+)\|(\w+)\]\s?(.*)$/)
-    if (m) {
-      const idx = parseInt(m[1])
-      if (idx < result.length) result[idx] = { type: m[2] as EpubBlock['type'], text: m[3] }
-    }
-  }
-  return result
 }
 
 // ── Vocab popup ───────────────────────────────────────────────────────────────
@@ -208,10 +183,9 @@ function EpubBlockView({
         onClick={onHighlightClick}
         style={{
           background: HIGHLIGHT_BG[seg.color] ?? HIGHLIGHT_BG.yellow,
-          color: HIGHLIGHT_COLOR[seg.color] ?? HIGHLIGHT_COLOR.yellow,
           borderRadius: 3,
           padding: '1px 2px',
-          fontWeight: 500,
+          fontWeight: 600,
           cursor: 'pointer',
           textDecoration: 'underline',
           textDecorationStyle: 'dotted',
@@ -292,21 +266,21 @@ export default function ReaderEPUB({ path }: Props) {
     epubChapters, epubChapterIdx, readerTheme,
     setEpubChapters, setEpubChapter,
     setWordPopup, annotationPanelOpen, tocOpen, notePanelOpen,
-    setBookmark, getBookmarkVal,
-    translationEnabled, annotations,
-    setAnnotations,
+    setPosition, getPosition,
+    annotations, setAnnotations,
+    translationEnabled, docSearchOpen,
   } = useReaderStore()
-  const { aiConfig, openTab, setActivity } = useAppStore()
+  const { openTab, setActivity } = useAppStore()
 
   const [loading, setLoading] = useState(false)
   const [fontSizeIdx, setFontSizeIdx] = useState(2)
-  const [translating, setTranslating] = useState(false)
-  const translationCache = useRef<Map<number, EpubBlock[]>>(new Map())
-  const [translatedBlocks, setTranslatedBlocks] = useState<EpubBlock[] | null>(null)
   const [vocab, setVocab] = useState<{ front: string; back: string; type: string }[]>([])
   const [vocabPopup, setVocabPopup] = useState<{
     front: string; back: string; vtype: string; x: number; y: number
   } | null>(null)
+  const [translatedText, setTranslatedText] = useState<string | null>(null)
+  const [translating, setTranslating] = useState(false)
+  const translationCache = useRef<Map<string, string>>(new Map())
 
   const containerRef = useRef<HTMLDivElement>(null)
   const stem = path.replace(/\.[^/.]+$/, '').split('/').pop() ?? path
@@ -314,20 +288,18 @@ export default function ReaderEPUB({ path }: Props) {
 
   // Load EPUB + annotations
   useEffect(() => {
-    translationCache.current.clear()
     setLoading(true)
     loadEpub(path)
       .then((chapters) => {
         setEpubChapters(chapters)
-        const bm = getBookmarkVal(stem)
-        setEpubChapter(bm !== null ? bm : 0)
+        const pos = getPosition(stem)
+        setEpubChapter(pos !== null ? pos : 0)
       })
       .catch((err) => {
         setEpubChapters([{ title: 'Error', blocks: [{ type: 'p', text: String(err) }] }])
         setEpubChapter(0)
       })
       .finally(() => setLoading(false))
-    // Load annotations so highlights render immediately (panel need not be open)
     loadAnnotations(stem).then((a) => setAnnotations(stem, a)).catch(() => {})
   }, [path])
 
@@ -338,23 +310,9 @@ export default function ReaderEPUB({ path }: Props) {
 
   // Track reading position + scroll to top on chapter change
   useEffect(() => {
-    if (epubChapters.length > 0) setBookmark(stem, epubChapterIdx)
-    setTranslatedBlocks(null)
+    if (epubChapters.length > 0) setPosition(stem, epubChapterIdx)
     containerRef.current?.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior })
   }, [epubChapterIdx])
-
-  // Auto-translate
-  useEffect(() => {
-    const chapter = epubChapters[epubChapterIdx]
-    if (!chapter || !translationEnabled) { setTranslatedBlocks(null); return }
-    const cached = translationCache.current.get(epubChapterIdx)
-    if (cached) { setTranslatedBlocks(cached); return }
-    setTranslating(true)
-    translateBlocks(chapter.blocks, aiConfig ?? undefined)
-      .then((blocks) => { translationCache.current.set(epubChapterIdx, blocks); setTranslatedBlocks(blocks) })
-      .catch(() => setTranslatedBlocks(null))
-      .finally(() => setTranslating(false))
-  }, [translationEnabled, epubChapterIdx, epubChapters])
 
   // Keyboard chapter navigation
   useEffect(() => {
@@ -371,42 +329,50 @@ export default function ReaderEPUB({ path }: Props) {
     return () => window.removeEventListener('keydown', onKey)
   }, [epubChapterIdx, epubChapters.length, setEpubChapter])
 
-  // Text selection
+  // Translation
+  useEffect(() => {
+    if (!translationEnabled || !chapter) { setTranslatedText(null); return }
+    const key = `${stem}:${epubChapterIdx}`
+    const cached = translationCache.current.get(key)
+    if (cached) { setTranslatedText(cached); return }
+    const text = chapter.blocks.map(b => b.text).join('\n').slice(0, 4000)
+    setTranslating(true)
+    setTranslatedText(null)
+    aiChat([{ role: 'user', content: `Traduce al español el siguiente texto. Mantén el formato de párrafos:\n\n${text}` }])
+      .then(r => { translationCache.current.set(key, r.response); setTranslatedText(r.response) })
+      .catch(() => setTranslatedText('Error al traducir. Verifica la configuración de IA.'))
+      .finally(() => setTranslating(false))
+  }, [translationEnabled, epubChapterIdx, stem])
+
+  // Text selection — same pattern as PDF (works reliably)
   const mousedownInReader = useRef(false)
   useEffect(() => {
     const container = containerRef.current
-    const onDown = (e: MouseEvent) => {
-      if (container?.contains(e.target as Node)) mousedownInReader.current = true
-    }
+    const onDown = () => { mousedownInReader.current = true }
     const onUp = () => {
       if (!mousedownInReader.current) return
       mousedownInReader.current = false
-      requestAnimationFrame(() => {
-        setTimeout(() => {
-          const sel = window.getSelection()
-          if (!sel || sel.isCollapsed || sel.rangeCount === 0) return
-          const text = sel.toString().replace(/\s+/g, ' ').trim()
-          if (!text || text.length > 2000) return
-          const range = sel.getRangeAt(0)
-          // getBoundingClientRect() returns zero for cross-block selections; use getClientRects() as fallback
-          const clientRects = Array.from(range.getClientRects()).filter(r => r.width > 0 && r.height > 0)
-          const rect = clientRects.length > 0 ? clientRects[clientRects.length - 1] : range.getBoundingClientRect()
-          if (rect.height === 0) return
-          const x = Math.max(8, rect.left + rect.width / 2 - 112)
-          setWordPopup({ stem, text, x, y: rect.bottom, chapterIdx: epubChapterIdx })
-        }, 10)
-      })
+      setTimeout(() => {
+        const sel = window.getSelection()
+        if (!sel || sel.isCollapsed) return
+        const text = sel.toString().replace(/\n/g, ' ').replace(/\s+/g, ' ').trim()
+        if (!text || text.length > 2000) return
+        const range = sel.getRangeAt(0)
+        const clientRects = Array.from(range.getClientRects()).filter(r => r.width > 1 && r.height > 1)
+        if (clientRects.length === 0) return
+        const lastRect = clientRects[clientRects.length - 1]
+        setWordPopup({ stem, text, x: lastRect.left + lastRect.width / 2 - 112, y: lastRect.bottom, chapterIdx: epubChapterIdx })
+      }, 60)
     }
-    document.addEventListener('mousedown', onDown)
+    container?.addEventListener('mousedown', onDown)
     document.addEventListener('mouseup', onUp)
     return () => {
-      document.removeEventListener('mousedown', onDown)
+      container?.removeEventListener('mousedown', onDown)
       document.removeEventListener('mouseup', onUp)
     }
   }, [epubChapterIdx, setWordPopup])
 
   const chapter = epubChapters[epubChapterIdx]
-  const displayBlocks = (translationEnabled && translatedBlocks) ? translatedBlocks : chapter?.blocks
   const progress = epubChapters.length > 0 ? Math.round((epubChapterIdx / epubChapters.length) * 100) : 0
   const bg = BG[readerTheme], fg = FG[readerTheme], headingFg = HEADING_FG[readerTheme]
 
@@ -447,15 +413,9 @@ export default function ReaderEPUB({ path }: Props) {
           style={{ width: `${progress}%`, background: 'linear-gradient(90deg, var(--indigo), var(--teal))' }} />
       </div>
 
-      {/* Font size + translation status */}
+      {/* Font size controls */}
       <div className="flex items-center justify-end gap-2 px-3 py-1 flex-shrink-0"
         style={{ background: bg, borderBottom: `1px solid rgba(255,255,255,0.04)` }}>
-        {translationEnabled && (
-          <span className="text-[9px] px-2 py-0.5 rounded-full"
-            style={{ background: 'var(--indigo-dim)', color: 'var(--indigo)', border: '1px solid rgba(129,140,248,.25)' }}>
-            {translating ? 'Traduciendo…' : '🌐 Traducido'}
-          </span>
-        )}
         <button onClick={() => setFontSizeIdx(i => Math.max(0, i - 1))}
           className="text-[10px] px-1.5 py-0.5 rounded"
           style={{ color: 'var(--text3)', background: 'rgba(255,255,255,0.04)' }}>A-</button>
@@ -498,12 +458,7 @@ export default function ReaderEPUB({ path }: Props) {
           }}>
             {chapter ? (
               <>
-                {translating && !translatedBlocks && (
-                  <div style={{ color: 'var(--indigo)', fontSize: 13, marginBottom: 24, opacity: 0.7 }}>
-                    Traduciendo capítulo…
-                  </div>
-                )}
-                {displayBlocks?.map((block, i) => (
+                {chapter.blocks?.map((block, i) => (
                   <EpubBlockView
                     key={i}
                     type={block.type}
@@ -527,7 +482,27 @@ export default function ReaderEPUB({ path }: Props) {
 
         {annotationPanelOpen && <AnnotationsPanel stem={stem} />}
         {notePanelOpen && <ReaderNotePanel stem={stem} docType="epub" />}
+        {docSearchOpen && <EpubDocSearch chapters={epubChapters} onJump={setEpubChapter} />}
       </div>
+
+      {/* Translation panel */}
+      {translationEnabled && (
+        <div className="flex-shrink-0 overflow-y-auto" style={{
+          maxHeight: 220, borderTop: '1px solid var(--border)',
+          background: 'var(--bg2)', padding: '10px 16px',
+        }}>
+          <div className="text-[9px] uppercase tracking-wider mb-2" style={{ color: 'var(--teal)' }}>
+            Traducción
+          </div>
+          {translating ? (
+            <div className="text-[11px]" style={{ color: 'var(--text3)' }}>Traduciendo…</div>
+          ) : translatedText ? (
+            <div className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--text2)' }}>
+              {translatedText}
+            </div>
+          ) : null}
+        </div>
+      )}
 
       <WordPopup />
 

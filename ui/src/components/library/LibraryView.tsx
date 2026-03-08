@@ -5,7 +5,7 @@ import { useAppStore } from '@/store/app'
 import type { DocMeta, DocStatus } from '@/lib/types'
 
 type Filter = 'all' | 'reading' | 'toread' | 'read' | 'favorites'
-type SortKey = 'name' | 'author' | 'year' | 'status' | 'progress' | 'ext' | 'last_opened' | 'total_read_seconds'
+type SortKey = 'name' | 'author' | 'year' | 'pages' | 'language' | 'publisher' | 'status' | 'progress' | 'ext' | 'last_opened' | 'total_read_seconds'
 type SortDir = 'asc' | 'desc'
 
 const FILTERS: { id: Filter; label: string }[] = [
@@ -27,6 +27,26 @@ const EXT_COLOR: Record<string, string> = {
 }
 const STATUS_ORDER: Record<DocStatus, number> = {
   reading: 0, toread: 1, unread: 2, read: 3,
+}
+
+const ROW_HEIGHT = 33   // px — must match actual row height
+const BUFFER     = 15   // extra rows rendered above/below viewport
+
+function parseStem(stem: string): { title: string; author: string; year: string } {
+  let s = stem
+  let year = ''
+  let author = ''
+  const yearMatch = s.match(/\s*\((\d{4})\)\s*$/)
+  if (yearMatch) {
+    year = yearMatch[1]
+    s = s.slice(0, yearMatch.index!).trim()
+  }
+  const dashIdx = s.indexOf(' - ')
+  if (dashIdx > 0) {
+    author = s.slice(0, dashIdx).trim()
+    s = s.slice(dashIdx + 3).trim()
+  }
+  return { title: s, author, year }
 }
 
 function fmtTime(seconds: number): string {
@@ -53,7 +73,7 @@ function fmtDate(iso: string): string {
 }
 
 export default function LibraryView() {
-  const { openTab } = useAppStore()
+  const { openTab, setActivity } = useAppStore()
   const [docs, setDocs] = useState<DocMeta[]>([])
   const [filter, setFilter] = useState<Filter>('all')
   const [search, setSearch] = useState('')
@@ -61,6 +81,9 @@ export default function LibraryView() {
   const [loading, setLoading] = useState(false)
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
+  const [scrollTop, setScrollTop] = useState(0)
+  const [containerH, setContainerH] = useState(700)
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   const loadDocs = useCallback(() => {
     listDocuments().then(setDocs)
@@ -73,13 +96,34 @@ export default function LibraryView() {
     return () => clearInterval(interval)
   }, [])
 
+  // Virtual scroll: track scroll position with rAF debounce
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    setContainerH(el.clientHeight)
+    let rafId: number
+    const onScroll = () => {
+      cancelAnimationFrame(rafId)
+      rafId = requestAnimationFrame(() => setScrollTop(el.scrollTop))
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => { el.removeEventListener('scroll', onScroll); cancelAnimationFrame(rafId) }
+  }, [])
+
+  // Reset scroll to top whenever filters or sort change
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0
+    setScrollTop(0)
+  }, [filter, search, extFilter, sortKey, sortDir])
+
   const filtered = useMemo(() => {
     let result = docs.filter((d) => {
       if (filter === 'favorites' && !d.favorite) return false
       if (filter !== 'all' && filter !== 'favorites' && d.status !== filter) return false
       if (extFilter && d.ext !== extFilter) return false
       const q = search.toLowerCase()
-      if (q && !d.name.toLowerCase().includes(q) && !d.author.toLowerCase().includes(q)) return false
+      if (q && !d.name.toLowerCase().includes(q) && !d.author.toLowerCase().includes(q)
+            && !(d.publisher || '').toLowerCase().includes(q)) return false
       return true
     })
     result = [...result].sort((a, b) => {
@@ -101,8 +145,16 @@ export default function LibraryView() {
     return result
   }, [docs, filter, search, extFilter, sortKey, sortDir])
 
-  const openDoc = (doc: DocMeta) =>
+  // Virtual window: only render visible rows + buffer
+  const startIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - BUFFER)
+  const endIdx   = Math.min(filtered.length, Math.ceil((scrollTop + containerH) / ROW_HEIGHT) + BUFFER)
+  const topPad   = startIdx * ROW_HEIGHT
+  const botPad   = (filtered.length - endIdx) * ROW_HEIGHT
+
+  const openDoc = (doc: DocMeta) => {
     openTab({ id: `doc:${doc.path}`, name: doc.name, type: doc.ext as 'pdf' | 'epub' | 'txt', path: doc.path })
+    setActivity('explorer')
+  }
 
   const toggleFavorite = async (e: React.MouseEvent, doc: DocMeta) => {
     e.stopPropagation()
@@ -187,7 +239,7 @@ export default function LibraryView() {
       </div>
 
       {/* ── Table ─── */}
-      <div className="flex-1 overflow-auto">
+      <div ref={scrollRef} className="flex-1 overflow-auto">
         {loading && docs.length === 0 ? (
           <div className="flex items-center justify-center h-40 text-sm" style={{ color: 'var(--text3)' }}>Cargando…</div>
         ) : filtered.length === 0 ? (
@@ -203,8 +255,11 @@ export default function LibraryView() {
               <col style={{ width: 28 }} />   {/* ★ */}
               <col style={{ width: 50 }} />   {/* fmt */}
               <col />                          {/* title */}
-              <col style={{ width: 150 }} />  {/* author */}
+              <col style={{ width: 140 }} />  {/* author */}
               <col style={{ width: 46 }} />   {/* year */}
+              <col style={{ width: 44 }} />   {/* pages */}
+              <col style={{ width: 58 }} />   {/* language */}
+              <col style={{ width: 120 }} />  {/* publisher */}
               <col style={{ width: 86 }} />   {/* status */}
               <col style={{ width: 90 }} />   {/* progress */}
               <col style={{ width: 72 }} />   {/* last opened */}
@@ -217,6 +272,9 @@ export default function LibraryView() {
                 <Th col="name" label="TÍTULO" />
                 <Th col="author" label="AUTOR" />
                 <Th col="year" label="AÑO" />
+                <Th col="pages" label="PÁG." />
+                <Th col="language" label="IDIOMA" />
+                <Th col="publisher" label="EDITORIAL" />
                 <Th col="status" label="ESTADO" />
                 <Th col="progress" label="PROGRESO" />
                 <Th col="last_opened" label="ABIERTO" />
@@ -224,14 +282,16 @@ export default function LibraryView() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((doc, i) => (
-                <BookRow key={doc.path} doc={doc} even={i % 2 === 0}
+              {topPad > 0 && <tr style={{ height: topPad }}><td colSpan={12} /></tr>}
+              {filtered.slice(startIdx, endIdx).map((doc, i) => (
+                <BookRow key={doc.path} doc={doc} even={(startIdx + i) % 2 === 0}
                   onOpen={() => openDoc(doc)}
                   onToggleFavorite={(e) => toggleFavorite(e, doc)}
                   onCycleStatus={(e) => cycleStatus(e, doc)}
                   onSaveYear={(y) => saveYear(doc, y)}
                 />
               ))}
+              {botPad > 0 && <tr style={{ height: botPad }}><td colSpan={12} /></tr>}
             </tbody>
           </table>
         )}
@@ -252,6 +312,11 @@ function BookRow({ doc, even, onOpen, onToggleFavorite, onCycleStatus, onSaveYea
   const [yearDraft, setYearDraft] = useState(doc.year ?? '')
   const yearInputRef = useRef<HTMLInputElement>(null)
 
+  const parsed = useMemo(() => parseStem(doc.name), [doc.name])
+  const displayTitle = doc.title || parsed.title || doc.name
+  const displayAuthor = doc.author || parsed.author
+  const displayYear = doc.year || parsed.year
+
   const color = EXT_COLOR[doc.ext] ?? 'var(--text3)'
   const sColor = STATUS_COLOR[doc.status]
   const progressColor = doc.status === 'read' ? 'var(--green)' : doc.status === 'reading' ? 'var(--indigo)' : 'var(--border2)'
@@ -264,7 +329,7 @@ function BookRow({ doc, even, onOpen, onToggleFavorite, onCycleStatus, onSaveYea
   return (
     <tr onClick={onOpen} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
       className="cursor-pointer"
-      style={{ background: hovered ? 'var(--bg3)' : even ? 'transparent' : 'rgba(255,255,255,0.018)', borderBottom: '1px solid var(--border)' }}>
+      style={{ height: ROW_HEIGHT, background: hovered ? 'var(--bg3)' : even ? 'transparent' : 'rgba(255,255,255,0.018)', borderBottom: '1px solid var(--border)' }}>
 
       {/* ★ */}
       <td style={{ padding: '4px 4px', textAlign: 'center' }}>
@@ -282,15 +347,15 @@ function BookRow({ doc, even, onOpen, onToggleFavorite, onCycleStatus, onSaveYea
 
       {/* Title */}
       <td style={{ padding: '4px 8px', overflow: 'hidden' }}>
-        <span className="block truncate text-xs font-medium" style={{ color: 'var(--text)' }} title={doc.name}>
-          {doc.name}
+        <span className="block truncate text-xs font-medium" style={{ color: 'var(--text)' }} title={displayTitle}>
+          {displayTitle}
         </span>
       </td>
 
       {/* Author */}
       <td style={{ padding: '4px 8px', overflow: 'hidden' }}>
-        <span className="block truncate" style={{ color: 'var(--text3)', fontSize: 11 }} title={doc.author}>
-          {doc.author || '—'}
+        <span className="block truncate" style={{ color: 'var(--text3)', fontSize: 11 }} title={displayAuthor}>
+          {displayAuthor || '—'}
         </span>
       </td>
 
@@ -311,12 +376,33 @@ function BookRow({ doc, even, onOpen, onToggleFavorite, onCycleStatus, onSaveYea
           <span
             onClick={() => { setYearDraft(doc.year ?? ''); setEditingYear(true) }}
             className="block text-center text-[10px] rounded cursor-text"
-            style={{ color: doc.year ? 'var(--text2)' : 'var(--border2)', minWidth: 30 }}
+            style={{ color: displayYear ? 'var(--text2)' : 'var(--border2)', minWidth: 30 }}
             title="Clic para editar año"
           >
-            {doc.year || '—'}
+            {displayYear || '—'}
           </span>
         )}
+      </td>
+
+      {/* Pages */}
+      <td style={{ padding: '4px 6px' }}>
+        <span className="block text-center tabular-nums" style={{ color: 'var(--text3)', fontSize: 10 }}>
+          {doc.pages ? doc.pages : '—'}
+        </span>
+      </td>
+
+      {/* Language */}
+      <td style={{ padding: '4px 6px' }}>
+        <span className="block text-center text-[10px] uppercase" style={{ color: 'var(--text3)' }}>
+          {doc.language || '—'}
+        </span>
+      </td>
+
+      {/* Publisher */}
+      <td style={{ padding: '4px 8px', overflow: 'hidden' }}>
+        <span className="block truncate" style={{ color: 'var(--text3)', fontSize: 10 }} title={doc.publisher}>
+          {doc.publisher || '—'}
+        </span>
       </td>
 
       {/* Status */}

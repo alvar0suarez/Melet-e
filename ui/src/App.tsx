@@ -2,14 +2,16 @@ import React, { useEffect, useState, useRef, useCallback } from 'react'
 import {
   LayoutDashboard, BookOpen, Share2, Calendar, GitBranch, CreditCard, Settings, StickyNote
 } from 'lucide-react'
-import { getVault, setupVault, getAIConfig, getCollections } from '@/lib/api'
+import { getVault, setupVault, getAIConfig, getCollections, checkAuth } from '@/lib/api'
 import { useAppStore } from '@/store/app'
+import LoginScreen from '@/components/auth/LoginScreen'
 import TitleBar from '@/components/layout/TitleBar'
 import ActivityBar from '@/components/layout/ActivityBar'
 import Sidebar from '@/components/layout/Sidebar'
 import StatusBar from '@/components/layout/StatusBar'
 import ExplorerView from '@/components/explorer/ExplorerView'
 import LibraryView from '@/components/library/LibraryView'
+import BookmarksView from '@/components/library/BookmarksView'
 import CalendarView from '@/components/calendar/CalendarView'
 import SCView from '@/components/sourcecontrol/SCView'
 import FlashcardsView from '@/components/flashcards/FlashcardsView'
@@ -17,6 +19,7 @@ import KeepView from '@/components/keep/KeepView'
 import ToastContainer from '@/components/shared/Toast'
 import GraphView from '@/components/graph/GraphView'
 import AISettings from '@/components/shared/AISettings'
+import SearchModal from '@/components/shared/SearchModal'
 import type { Activity } from '@/lib/types'
 
 const isMobile = () => window.innerWidth < 768
@@ -172,6 +175,9 @@ export default function App() {
   } = useAppStore()
   const [showSetup, setShowSetup] = useState(false)
   const [mobile, setMobile] = useState(isMobile())
+  const [showSearch, setShowSearch] = useState(false)
+  const [authReady, setAuthReady] = useState(false)   // false = checking auth
+  const [needsLogin, setNeedsLogin] = useState(false)
   const sidebarDragging = useRef(false)
 
   useEffect(() => {
@@ -181,13 +187,49 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); setShowSearch(v => !v) }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
+  // Auth check: on startup decide if we need a login screen
+  useEffect(() => {
+    checkAuth().then(({ configured }) => {
+      if (!configured) {
+        // No password set → open access (desktop/LAN mode)
+        setAuthReady(true)
+        return
+      }
+      const token = localStorage.getItem('melete_token')
+      if (token) {
+        // Validate token by pinging a protected endpoint
+        fetch('/api/vault', { headers: { 'X-Melete-Token': token } })
+          .then(r => {
+            if (r.status === 401) { localStorage.removeItem('melete_token'); setNeedsLogin(true) }
+            else setAuthReady(true)
+          })
+          .catch(() => setAuthReady(true))
+      } else {
+        setNeedsLogin(true)
+      }
+    }).catch(() => setAuthReady(true))   // server unreachable → show vault setup
+  }, [])
+
+  const handleAuthenticated = () => {
+    setNeedsLogin(false)
+    setAuthReady(true)
+  }
+
+  useEffect(() => {
+    if (!authReady) return
     ;(async () => {
       try {
         const { path, valid } = await getVault()
         if (valid && path) {
           setVaultPath(path)
           setVaultReady(true)
-          // Load AI config
           const cfg = await getAIConfig().catch(() => null)
           if (cfg) setAIConfig(cfg)
           const colls = await getCollections().catch(() => [])
@@ -199,7 +241,7 @@ export default function App() {
         setShowSetup(true)
       }
     })()
-  }, [])
+  }, [authReady])
 
   const handleVaultReady = async () => {
     try {
@@ -233,6 +275,9 @@ export default function App() {
     document.addEventListener('mouseup', onUp)
   }, [sidebarWidth])
 
+  if (needsLogin) return <LoginScreen onAuthenticated={handleAuthenticated} />
+  if (!authReady) return null   // brief check — avoids flash
+
   if (showSetup) return <VaultSetup onDone={handleVaultReady} />
 
   const showSidebar = sidebarVisible && SHOW_SIDEBAR_ACTIVITIES.includes(activity) && !mobile
@@ -241,6 +286,7 @@ export default function App() {
     switch (activity) {
       case 'explorer': return <ExplorerView />
       case 'library': return <LibraryView />
+      case 'bookmarks': return <BookmarksView />
       case 'calendar': return <CalendarView />
       case 'sourcecontrol': return <SCView />
       case 'flashcards': return <FlashcardsView />
@@ -256,6 +302,7 @@ export default function App() {
     return (
       <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--bg)' }}>
         <ToastContainer />
+        {showSearch && <SearchModal onClose={() => setShowSearch(false)} />}
         <div className="flex-1 overflow-hidden">
           {renderView()}
         </div>
@@ -267,8 +314,9 @@ export default function App() {
   // Desktop layout
   return (
     <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--bg)' }}>
-      <TitleBar />
+      <TitleBar onOpenSearch={() => setShowSearch(true)} />
       <ToastContainer />
+      {showSearch && <SearchModal onClose={() => setShowSearch(false)} />}
 
       <div className="flex flex-1 overflow-hidden">
         {/* Activity Bar */}

@@ -19,16 +19,26 @@ export type DocExt = 'pdf' | 'epub' | 'txt'
 
 export interface DocMeta {
   path: string
-  name: string
+  name: string       // filename stem (raw)
+  title: string      // clean title from metadata (may be empty)
   ext: DocExt
   status: DocStatus
   progress: number
   favorite: boolean
   author: string
   year: string
+  pages: number
+  language: string
+  publisher: string
   collections: string[]
   last_opened: string        // ISO date string, empty if never
   total_read_seconds: number // cumulative reading time
+}
+
+export interface PdfOutlineItem {
+  level: number
+  title: string
+  page: number  // 0-indexed
 }
 
 // ─── EPUB ─────────────────────────────────────────────────────────────────
@@ -163,6 +173,7 @@ export interface KeepCard {
   pinned: boolean
   created: string
   updated: string
+  note_refs?: string[]   // linked note names (notebook pages)
 }
 
 // ─── Flashcard Decks ──────────────────────────────────────────────────────
@@ -192,6 +203,7 @@ export interface FlashDeck {
 export type Activity =
   | 'explorer'
   | 'library'
+  | 'bookmarks'
   | 'calendar'
   | 'sourcecontrol'
   | 'flashcards'

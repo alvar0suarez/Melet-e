@@ -1,14 +1,15 @@
 import React from 'react'
 import {
   LayoutDashboard, Share2, BookOpen, Calendar, GitBranch,
-  CreditCard, Settings, StickyNote
+  CreditCard, Settings, StickyNote, Bookmark
 } from 'lucide-react'
 import { useAppStore } from '@/store/app'
 import type { Activity } from '@/lib/types'
 
 const items: { id: Activity; icon: React.ReactNode; label: string }[] = [
   { id: 'explorer', icon: <LayoutDashboard size={18} strokeWidth={1.6} />, label: 'Explorer' },
-  { id: 'library', icon: <BookOpen size={18} strokeWidth={1.6} />, label: 'Library' },
+  { id: 'library', icon: <BookOpen size={18} strokeWidth={1.6} />, label: 'Biblioteca' },
+  { id: 'bookmarks', icon: <Bookmark size={18} strokeWidth={1.6} />, label: 'Marcadores' },
   { id: 'keep', icon: <StickyNote size={18} strokeWidth={1.6} />, label: 'Keep' },
   { id: 'graph', icon: <Share2 size={18} strokeWidth={1.6} />, label: 'Graph' },
   { id: 'calendar', icon: <Calendar size={18} strokeWidth={1.6} />, label: 'Calendar' },

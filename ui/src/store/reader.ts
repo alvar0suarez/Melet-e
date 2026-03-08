@@ -41,14 +41,23 @@ interface ReaderState {
   tocOpen: boolean
   toggleToc: () => void
 
-  // Bookmarks (reading position) — stem → value (page for PDF, chapterIdx for EPUB)
+  // Explicit bookmarks (user-set via button) — stem → page/chapter
   bookmarks: Record<string, number>
   setBookmark: (stem: string, val: number) => void
-  getBookmarkVal: (stem: string) => number | null
+  removeBookmark: (stem: string) => void
+
+  // Reading positions (auto-tracked) — stem → last page/chapter
+  positions: Record<string, number>
+  setPosition: (stem: string, val: number) => void
+  getPosition: (stem: string) => number | null
 
   // Word popup
   wordPopup: { stem: string; text: string; x: number; y: number; page?: number; chapterIdx?: number; pdfAreas?: PdfArea[] } | null
   setWordPopup: (wp: { stem: string; text: string; x: number; y: number; page?: number; chapterIdx?: number; pdfAreas?: PdfArea[] } | null) => void
+
+  // In-document search
+  docSearchOpen: boolean
+  toggleDocSearch: () => void
 
   // Translation
   translationEnabled: boolean
@@ -115,13 +124,35 @@ export const useReaderStore = create<ReaderState>((set, get) => ({
       return { bookmarks: next }
     })
   },
-  getBookmarkVal: (stem) => {
-    const val = get().bookmarks[stem]
+  removeBookmark: (stem) => {
+    set((s) => {
+      const next = { ...s.bookmarks }
+      delete next[stem]
+      try { localStorage.setItem('melete_bookmarks', JSON.stringify(next)) } catch {}
+      return { bookmarks: next }
+    })
+  },
+
+  positions: (() => {
+    try { return JSON.parse(localStorage.getItem('melete_positions') ?? '{}') } catch { return {} }
+  })(),
+  setPosition: (stem, val) => {
+    set((s) => {
+      const next = { ...s.positions, [stem]: val }
+      try { localStorage.setItem('melete_positions', JSON.stringify(next)) } catch {}
+      return { positions: next }
+    })
+  },
+  getPosition: (stem) => {
+    const val = get().positions[stem]
     return val !== undefined ? val : null
   },
 
   wordPopup: null,
   setWordPopup: (wordPopup) => set({ wordPopup }),
+
+  docSearchOpen: false,
+  toggleDocSearch: () => set((s) => ({ docSearchOpen: !s.docSearchOpen })),
 
   translationEnabled: false,
   toggleTranslation: () => set((s) => ({ translationEnabled: !s.translationEnabled })),

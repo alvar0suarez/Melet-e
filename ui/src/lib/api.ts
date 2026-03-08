@@ -9,8 +9,16 @@ import type {
 
 const BASE = import.meta.env.VITE_API_URL ?? ''
 
+const getToken = () => localStorage.getItem('melete_token') ?? ''
+
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  const t = getToken()
+  return t ? { 'X-Melete-Token': t, ...extra } : { ...extra }
+}
+
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`)
+  const res = await fetch(`${BASE}${path}`, { headers: authHeaders() })
+  if (res.status === 401) { localStorage.removeItem('melete_token'); window.location.reload() }
   if (!res.ok) throw new Error(`GET ${path} → ${res.status}`)
   return res.json()
 }
@@ -18,18 +26,43 @@ async function get<T>(path: string): Promise<T> {
 async function post<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : {},
+    headers: authHeaders(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
+  if (res.status === 401) { localStorage.removeItem('melete_token'); window.location.reload() }
   if (!res.ok) throw new Error(`POST ${path} → ${res.status}`)
   return res.json()
 }
 
 async function del<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { method: 'DELETE' })
+  const res = await fetch(`${BASE}${path}`, { method: 'DELETE', headers: authHeaders() })
+  if (res.status === 401) { localStorage.removeItem('melete_token'); window.location.reload() }
   if (!res.ok) throw new Error(`DELETE ${path} → ${res.status}`)
   return res.json()
 }
+
+// ─── Auth ─────────────────────────────────────────────────────────────────
+
+export const checkAuth = () =>
+  fetch(`${BASE}/api/auth/check`).then(r => r.json()) as Promise<{ configured: boolean }>
+
+export const setupAuth = (password: string) =>
+  fetch(`${BASE}/api/auth/setup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  }).then(r => r.ok ? r.json() : r.json().then((e: { detail: string }) => Promise.reject(new Error(e.detail)))) as Promise<{ ok: boolean; token: string }>
+
+export const loginAuth = (password: string) =>
+  fetch(`${BASE}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  }).then(r => r.ok ? r.json() : Promise.reject(new Error('Wrong password'))) as Promise<{ ok: boolean; token: string }>
+
+export const logoutAuth = () => post<{ ok: boolean }>('/api/auth/logout')
+export const changePassword = (password: string) =>
+  post<{ ok: boolean; token: string }>('/api/auth/change-password', { password })
 
 // ─── Vault ───────────────────────────────────────────────────────────────
 
@@ -54,6 +87,10 @@ export const vaultFileUrl = (path: string) => `${BASE}/vault-files/${path}`
 export const getPdfPageCount = (path: string) => get<{ count: number }>(`/api/pdf/count/${encodeURIComponent(path)}`)
 export const getPdfText = (path: string, page: number) =>
   get<{ text: string }>(`/api/pdf/text/${encodeURIComponent(path)}?page=${page}`)
+export const getPdfOutline = (path: string) =>
+  get<{ level: number; title: string; page: number }[]>(`/api/pdf/outline/${encodeURIComponent(path)}`)
+export const searchPdfText = (path: string, q: string) =>
+  get<{ page: number; ctx: string }[]>(`/api/pdf/search/${encodeURIComponent(path)}?q=${encodeURIComponent(q)}`)
 
 // ─── EPUB ─────────────────────────────────────────────────────────────────
 
@@ -74,6 +111,10 @@ export const appendBookHighlight = (stem: string, text: string, source: string, 
 export const getBacklinks = (name: string) => get<string[]>(`/api/notes/${encodeURIComponent(name)}/backlinks`)
 export const getBacklinksContext = (name: string) => get<{ note: string; ctx: string }[]>(`/api/notes/${encodeURIComponent(name)}/backlinks-context`)
 export const searchNotes = (q: string) => get<NoteSearchResult[]>(`/api/notes/search?q=${encodeURIComponent(q)}`)
+export const globalSearch = (q: string, paths: string[] = []) =>
+  get<{ notes: NoteSearchResult[]; docs: { path: string; type: string; page?: number; chapter?: number; title?: string; ctx: string }[] }>(
+    `/api/search?q=${encodeURIComponent(q)}&paths=${encodeURIComponent(paths.join(','))}`
+  )
 export const getGraph = () => get<GraphData>('/api/graph')
 
 // ─── Annotations ─────────────────────────────────────────────────────────
@@ -144,6 +185,8 @@ export const listPlugins = () => get<Plugin[]>('/api/plugins')
 // ─── Keep ─────────────────────────────────────────────────────────────────
 
 export const listCards = () => get<KeepCard[]>('/api/keep/cards')
+export const importPlanText = (text: string) => post<{ ok: boolean; count: number; cards: KeepCard[] }>('/api/keep/import', { text })
+export const scanPlans = () => post<{ ok: boolean; count: number }>('/api/keep/scan')
 export const createCard = (data: { type_: string; title?: string; content?: string; items?: unknown[]; color?: string; pinned?: boolean }) =>
   post<KeepCard>('/api/keep/cards', data)
 export const updateCard = (id: string, updates: Partial<KeepCard>) =>

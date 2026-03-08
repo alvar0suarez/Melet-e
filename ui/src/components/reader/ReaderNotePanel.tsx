@@ -76,8 +76,13 @@ export default function ReaderNotePanel({ stem, docType }: Props) {
     }
   }, [stem])
 
-  // Reload on open and whenever a new annotation is added
-  useEffect(() => { load() }, [load, annCount])
+  // Reload on stem/load change immediately; delay on annotation change to let backend write finish
+  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    if (annCount === 0) return
+    const t = setTimeout(() => load(), 700)
+    return () => clearTimeout(t)
+  }, [annCount])
 
   const handleClick = (entry: Entry) => {
     if (docType === 'epub' && entry.chapterIdx !== null) {

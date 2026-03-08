@@ -44,7 +44,12 @@ export default function ExplorerView() {
 
   // Determine what to show in each pane
   const noteTab = activeTab?.type === 'note' ? activeTab : tabs.find((t) => t.type === 'note')
-  const docTab = activeTab?.type !== 'note' ? activeTab : tabs.find((t) => t.type !== 'note')
+  const noteStem = noteTab?.name.replace(/\.md$/, '')
+  const docTab = activeTab?.type !== 'note'
+    ? activeTab
+    : (noteStem
+        ? tabs.find(t => t.type !== 'note' && (t.path ?? t.name).split('/').pop()?.replace(/\.[^/.]+$/, '') === noteStem)
+        : undefined) ?? tabs.find(t => t.type !== 'note')
 
   const isActiveDoc = activeTab && activeTab.type !== 'note'
   const isActiveNote = activeTab && activeTab.type === 'note'

@@ -1,5 +1,5 @@
 import React from 'react'
-import { ChevronLeft, ChevronRight, Sun, Moon, Coffee, StickyNote, List, Bookmark, BookmarkCheck, ZoomIn, ZoomOut, Languages, NotebookPen, PanelRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Sun, Moon, Coffee, StickyNote, List, Bookmark, BookmarkCheck, ZoomIn, ZoomOut, NotebookPen, PanelRight, Languages, Search } from 'lucide-react'
 import { useReaderStore } from '@/store/reader'
 import { useAppStore } from '@/store/app'
 
@@ -18,26 +18,19 @@ interface Props {
 }
 
 export default function ReaderToolbar({ title, page, pageCount, progress, onPrev, onNext, stem, docType, onZoomIn, onZoomOut, zoomLevel }: Props) {
-  const { readerTheme, setReaderTheme, toggleAnnotationPanel, annotationPanelOpen, tocOpen, toggleToc, bookmarks, setBookmark, translationEnabled, toggleTranslation, notePanelOpen, toggleNotePanel } = useReaderStore()
+  const { readerTheme, setReaderTheme, toggleAnnotationPanel, annotationPanelOpen, tocOpen, toggleToc, bookmarks, setBookmark, removeBookmark, notePanelOpen, toggleNotePanel, translationEnabled, toggleTranslation, docSearchOpen, toggleDocSearch } = useReaderStore()
   const { openTab, setActivity } = useAppStore()
   const isBookmarked = bookmarks[stem] !== undefined
+  const currentVal = page - 1  // 0-indexed
 
   const handleOpenNote = () => {
     openTab({ id: `note:${stem}`, name: `${stem}.md`, type: 'note' })
     setActivity('explorer')
   }
-  const currentVal = docType === 'epub' ? page - 1 : page - 1
 
   const handleBookmark = () => {
-    if (isBookmarked) {
-      // Remove bookmark
-      const next = { ...bookmarks }
-      delete next[stem]
-      try { localStorage.setItem('melete_bookmarks', JSON.stringify(next)) } catch {}
-      useReaderStore.setState({ bookmarks: next })
-    } else {
-      setBookmark(stem, currentVal)
-    }
+    if (isBookmarked) removeBookmark(stem)
+    else setBookmark(stem, currentVal)
   }
 
   return (
@@ -130,14 +123,19 @@ export default function ReaderToolbar({ title, page, pageCount, progress, onPrev
         <Coffee size={12} />
       </button>
 
-      {/* Translation toggle (EPUB only) */}
-      {docType === 'epub' && (
-        <button onClick={toggleTranslation} title={translationEnabled ? 'Mostrar original' : 'Traducir al español (IA)'}
-          className="p-1 rounded"
-          style={{ color: translationEnabled ? 'var(--indigo)' : 'var(--text3)', background: translationEnabled ? 'var(--indigo-dim)' : 'transparent' }}>
-          <Languages size={12} />
-        </button>
-      )}
+      {/* In-document search */}
+      <button onClick={toggleDocSearch} title="Buscar en el documento (Ctrl+F)"
+        className="p-1 rounded"
+        style={{ color: docSearchOpen ? 'var(--indigo)' : 'var(--text3)', background: docSearchOpen ? 'var(--indigo-dim)' : 'transparent' }}>
+        <Search size={12} />
+      </button>
+
+      {/* Translation toggle */}
+      <button onClick={toggleTranslation} title="Traducir"
+        className="p-1 rounded"
+        style={{ color: translationEnabled ? 'var(--teal)' : 'var(--text3)', background: translationEnabled ? 'var(--teal-dim)' : 'transparent' }}>
+        <Languages size={12} />
+      </button>
 
       {/* Note panel toggle (split view) */}
       <button onClick={toggleNotePanel} title="Panel de notas del libro"

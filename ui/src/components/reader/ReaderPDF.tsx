@@ -2,16 +2,18 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Viewer, Worker } from '@react-pdf-viewer/core'
 import type { RenderPageProps } from '@react-pdf-viewer/core'
 import { zoomPlugin } from '@react-pdf-viewer/zoom'
+import { pageNavigationPlugin } from '@react-pdf-viewer/page-navigation'
 import '@react-pdf-viewer/core/lib/styles/index.css'
 import '@react-pdf-viewer/default-layout/lib/styles/index.css'
 import { useReaderStore } from '@/store/reader'
 import { useAppStore } from '@/store/app'
-import { vaultFileUrl, loadAnnotations } from '@/lib/api'
-import type { PdfArea } from '@/lib/types'
+import { vaultFileUrl, loadAnnotations, getPdfOutline, getPdfText, aiChat } from '@/lib/api'
+import type { PdfArea, PdfOutlineItem } from '@/lib/types'
 import ReaderToolbar from './ReaderToolbar'
 import AnnotationsPanel from './AnnotationsPanel'
 import ReaderNotePanel from './ReaderNotePanel'
 import WordPopup from './WordPopup'
+import { PdfDocSearch } from './DocSearchPanel'
 
 const HIGHLIGHT_BG: Record<string, string> = {
   red:    'rgba(239,68,68,0.45)',
@@ -37,28 +39,36 @@ export default function ReaderPDF({ path }: Props) {
     pdfPage, pdfPageCount, readerTheme,
     setPdfPage, setPdfPageCount,
     annotationPanelOpen, tocOpen, notePanelOpen,
-    setWordPopup, setBookmark, getBookmarkVal,
+    setWordPopup, bookmarks, setBookmark, removeBookmark, setPosition, getPosition,
     setAnnotations, annotations,
+    translationEnabled, docSearchOpen, toggleDocSearch,
   } = useReaderStore()
   const { openTab, setActivity } = useAppStore()
 
   const [zoom, setZoom] = useState(1.0)
+  const [outline, setOutline] = useState<PdfOutlineItem[]>([])
+  const [translatedText, setTranslatedText] = useState<string | null>(null)
+  const [translating, setTranslating] = useState(false)
+  const translationCache = useRef<Map<string, string>>(new Map())
   const containerRef = useRef<HTMLDivElement>(null)
   const stem = path.replace(/\.[^/.]+$/, '').split('/').pop() ?? path
   const fileUrl = vaultFileUrl(path)
   const progress = pdfPageCount > 0 ? Math.round((pdfPage / pdfPageCount) * 100) : 0
 
-  // Restore bookmark on open + load annotations
+  // Restore bookmark on open + load annotations + load PDF outline
   const restoredRef = useRef(false)
   const docLoadedRef = useRef(false)
   useEffect(() => {
     restoredRef.current = false
     docLoadedRef.current = false
     loadAnnotations(stem).then((a) => setAnnotations(stem, a)).catch(() => {})
+    getPdfOutline(path).then(setOutline).catch(() => setOutline([]))
   }, [path])
 
-  // zoomPlugin calls React.useMemo internally — must be called at top level, NOT inside useMemo
+  // Plugins — must be called at top level
   const zoomPluginInstance = zoomPlugin({ enableShortcuts: false })
+  const pageNavPlugin = pageNavigationPlugin()
+  const { jumpToPage } = pageNavPlugin
 
   // Propagate zoom changes via the plugin (keeps the text layer aligned)
   useEffect(() => {
@@ -134,6 +144,24 @@ export default function ReaderPDF({ path }: Props) {
     }
   }, [pdfPage, setWordPopup])
 
+  // Translation
+  useEffect(() => {
+    if (!translationEnabled) { setTranslatedText(null); return }
+    const key = `${stem}:${pdfPage}`
+    const cached = translationCache.current.get(key)
+    if (cached) { setTranslatedText(cached); return }
+    setTranslating(true)
+    setTranslatedText(null)
+    getPdfText(path, pdfPage)
+      .then(({ text }) => {
+        if (!text.trim()) { setTranslating(false); return }
+        return aiChat([{ role: 'user', content: `Traduce al español el siguiente texto. Mantén el formato de párrafos:\n\n${text.slice(0, 4000)}` }])
+          .then(r => { translationCache.current.set(key, r.response); setTranslatedText(r.response) })
+      })
+      .catch(() => setTranslatedText('Error al traducir. Verifica la configuración de IA.'))
+      .finally(() => setTranslating(false))
+  }, [translationEnabled, pdfPage, stem])
+
   const handleZoomIn = useCallback(() => setZoom((z) => Math.min(3, parseFloat((z + STEP).toFixed(1)))), [])
   const handleZoomOut = useCallback(() => setZoom((z) => Math.max(0.4, parseFloat((z - STEP).toFixed(1)))), [])
 
@@ -142,21 +170,22 @@ export default function ReaderPDF({ path }: Props) {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
       if (['INPUT', 'TEXTAREA'].includes(tag)) return
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') { e.preventDefault(); toggleDocSearch(); return }
       if ((e.ctrlKey || e.metaKey) && e.key === '=') { e.preventDefault(); handleZoomIn(); return }
       if ((e.ctrlKey || e.metaKey) && e.key === '-') { e.preventDefault(); handleZoomOut(); return }
       if (pdfPageCount > 0) {
         if (e.key === 'ArrowRight' || e.key === 'PageDown') {
-          setPdfPage(Math.min(pdfPageCount - 1, pdfPage + 1))
+          jumpToPage(Math.min(pdfPageCount - 1, pdfPage + 1))
         } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
-          setPdfPage(Math.max(0, pdfPage - 1))
+          jumpToPage(Math.max(0, pdfPage - 1))
         }
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [handleZoomIn, handleZoomOut, pdfPage, pdfPageCount, setPdfPage])
+  }, [handleZoomIn, handleZoomOut, pdfPage, pdfPageCount, setPdfPage, toggleDocSearch])
 
-  const bookmarkPage = getBookmarkVal(stem)
+  const bookmarkPage = bookmarks[stem] ?? null
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -165,8 +194,8 @@ export default function ReaderPDF({ path }: Props) {
         page={pdfPage + 1}
         pageCount={pdfPageCount}
         progress={progress}
-        onPrev={() => pdfPageCount > 0 && setPdfPage(Math.max(0, pdfPage - 1))}
-        onNext={() => pdfPageCount > 0 && setPdfPage(Math.min(pdfPageCount - 1, pdfPage + 1))}
+        onPrev={() => pdfPageCount > 0 && jumpToPage(Math.max(0, pdfPage - 1))}
+        onNext={() => pdfPageCount > 0 && jumpToPage(Math.min(pdfPageCount - 1, pdfPage + 1))}
         stem={stem}
         docType="pdf"
         onZoomIn={handleZoomIn}
@@ -183,20 +212,33 @@ export default function ReaderPDF({ path }: Props) {
       <div className="flex flex-1 overflow-hidden">
         {/* TOC sidebar */}
         {tocOpen && (
-          <div
-            className="flex-shrink-0 overflow-y-auto"
-            style={{
-              width: 220,
-              borderRight: '1px solid var(--border)',
-              background: 'var(--bg2)',
-            }}
-          >
-            <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text3)', borderBottom: '1px solid var(--border)' }}>
-              Contents
+          <div className="flex-shrink-0 overflow-y-auto"
+            style={{ width: 220, borderRight: '1px solid var(--border)', background: 'var(--bg2)' }}>
+            <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider"
+              style={{ color: 'var(--text3)', borderBottom: '1px solid var(--border)' }}>
+              Índice
             </div>
-            <div className="p-4 text-xs" style={{ color: 'var(--text3)' }}>
-              No disponible para este PDF
-            </div>
+            {outline.length === 0 ? (
+              <div className="p-4 text-[11px]" style={{ color: 'var(--text3)' }}>
+                Sin índice
+              </div>
+            ) : (
+              outline.map((item, i) => (
+                <button key={i}
+                  onClick={() => jumpToPage(item.page)}
+                  className="w-full text-left py-1 pr-2 text-[11px] truncate hover:opacity-80 transition-opacity"
+                  style={{
+                    paddingLeft: (item.level - 1) * 12 + 10,
+                    color: item.level === 1 ? 'var(--text2)' : 'var(--text3)',
+                    fontWeight: item.level === 1 ? 500 : 400,
+                    borderBottom: '1px solid rgba(255,255,255,0.03)',
+                  }}
+                  title={`${item.title} — p. ${item.page + 1}`}
+                >
+                  <span className="block truncate">{item.title}</span>
+                </button>
+              ))
+            )}
           </div>
         )}
 
@@ -211,7 +253,7 @@ export default function ReaderPDF({ path }: Props) {
             <div
               className="absolute top-2 right-4 z-10 flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] cursor-pointer"
               style={{ background: 'rgba(227,179,65,0.15)', color: 'var(--orange)', border: '1px solid rgba(227,179,65,0.3)' }}
-              onClick={() => setPdfPage(bookmarkPage)}
+              onClick={() => jumpToPage(bookmarkPage)}
               title={`Go to bookmarked page ${bookmarkPage + 1}`}
             >
               ↩ Go to bookmark (p. {bookmarkPage + 1})
@@ -223,20 +265,20 @@ export default function ReaderPDF({ path }: Props) {
             <Worker workerUrl="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js">
               <Viewer
                 fileUrl={fileUrl}
-                plugins={[zoomPluginInstance]}
+                plugins={[zoomPluginInstance, pageNavPlugin]}
                 defaultScale={zoom}
                 onDocumentLoad={(e) => {
                   setPdfPageCount(e.doc.numPages)
                   docLoadedRef.current = true
                   if (!restoredRef.current) {
                     restoredRef.current = true
-                    const bm = getBookmarkVal(stem)
-                    if (bm !== null && bm > 0) setPdfPage(bm)
+                    const pos = getPosition(stem)
+                    if (pos !== null && pos > 0) setTimeout(() => jumpToPage(pos), 100)
                   }
                 }}
                 onPageChange={(e) => {
                   setPdfPage(e.currentPage)
-                  setBookmark(stem, e.currentPage)
+                  setPosition(stem, e.currentPage)
                 }}
                 initialPage={pdfPage}
                 renderPage={(props: RenderPageProps) => {
@@ -301,9 +343,29 @@ export default function ReaderPDF({ path }: Props) {
 
         {annotationPanelOpen && <AnnotationsPanel stem={stem} />}
         {notePanelOpen && <ReaderNotePanel stem={stem} docType="pdf" />}
+        {docSearchOpen && <PdfDocSearch path={path} onJump={jumpToPage} />}
       </div>
 
       <WordPopup />
+
+      {/* Translation panel */}
+      {translationEnabled && (
+        <div className="flex-shrink-0 overflow-y-auto" style={{
+          maxHeight: 220, borderTop: '1px solid var(--border)',
+          background: 'var(--bg2)', padding: '10px 16px',
+        }}>
+          <div className="text-[9px] uppercase tracking-wider mb-2" style={{ color: 'var(--teal)' }}>
+            Traducción — p. {pdfPage + 1}
+          </div>
+          {translating ? (
+            <div className="text-[11px]" style={{ color: 'var(--text3)' }}>Traduciendo…</div>
+          ) : translatedText ? (
+            <div className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--text2)' }}>
+              {translatedText}
+            </div>
+          ) : null}
+        </div>
+      )}
     </div>
   )
 }

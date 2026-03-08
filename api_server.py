@@ -7,9 +7,9 @@ import os
 from pathlib import Path
 from typing import Optional, List, Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -17,6 +17,7 @@ import melete_core as core
 import melete_calendar as cal
 import melete_versions as ver
 import melete_keep as keep
+import melete_auth as auth
 
 app = FastAPI(title="Melete API", version="1.0.0")
 
@@ -24,8 +25,78 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "X-Melete-Token"],
 )
+
+# ─── Auth middleware ─────────────────────────────────────────────────────────
+# If no password is configured, all requests pass through (desktop / LAN trust).
+# Once a password is set, every /api/ request must carry X-Melete-Token.
+
+_AUTH_PUBLIC = {"/api/auth/check", "/api/auth/setup", "/api/auth/login", "/api/vault", "/api/ping"}
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
+    # Non-API paths (static files, SPA) always pass through
+    if not path.startswith("/api/"):
+        return await call_next(request)
+    # Public API endpoints
+    if path in _AUTH_PUBLIC:
+        return await call_next(request)
+    # If auth not configured → open access (local / desktop mode)
+    if not auth.is_configured():
+        return await call_next(request)
+    # Check token
+    token = request.headers.get("X-Melete-Token", "")
+    if not auth.verify_token(token):
+        return Response(
+            content='{"error":"unauthorized"}',
+            status_code=401,
+            media_type="application/json",
+        )
+    return await call_next(request)
+
+
+# ─── Auth endpoints ──────────────────────────────────────────────────────────
+
+@app.get("/api/auth/check")
+def auth_check():
+    return {"configured": auth.is_configured()}
+
+
+class AuthPasswordRequest(BaseModel):
+    password: str
+
+@app.post("/api/auth/setup")
+def auth_setup(req: AuthPasswordRequest):
+    if auth.is_configured():
+        raise HTTPException(409, "Already configured — use change-password")
+    try:
+        token = auth.setup(req.password)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "token": token}
+
+@app.post("/api/auth/login")
+def auth_login(req: AuthPasswordRequest):
+    token = auth.login(req.password)
+    if not token:
+        raise HTTPException(401, "Wrong password")
+    return {"ok": True, "token": token}
+
+@app.post("/api/auth/logout")
+def auth_logout(request: Request):
+    token = request.headers.get("X-Melete-Token", "")
+    auth.logout(token)
+    return {"ok": True}
+
+@app.post("/api/auth/change-password")
+def auth_change_password(req: AuthPasswordRequest):
+    try:
+        token = auth.change_password(req.password)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "token": token}
 
 # ─── Ping ──────────────────────────────────────────────────────────────────
 
@@ -147,6 +218,11 @@ def pdf_text(path: str, page: int = Query(0)):
     return {"text": core.extract_pdf_text(path, page)}
 
 
+@app.get("/api/pdf/outline/{path:path}")
+def pdf_outline(path: str):
+    return core.get_pdf_outline(path)
+
+
 # ─── EPUB ──────────────────────────────────────────────────────────────────
 
 @app.get("/api/epub/{path:path}")
@@ -164,6 +240,18 @@ def list_notes():
 @app.get("/api/notes/search")
 def search_notes(q: str = Query("")):
     return core.search_notes(q)
+
+
+@app.get("/api/pdf/search/{path:path}")
+def search_pdf(path: str, q: str = Query("")):
+    return core.search_pdf_text(path, q)
+
+
+@app.get("/api/search")
+def global_search(q: str = Query(""), paths: str = Query("")):
+    """Search notes + optionally specific document files by content."""
+    file_paths = [p.strip() for p in paths.split(",") if p.strip()] if paths else []
+    return core.global_search(q, file_paths)
 
 
 @app.get("/api/graph")
@@ -469,11 +557,26 @@ def toggle_plugin(plugin_id: str, req: TogglePluginRequest):
     return {"ok": True}
 
 
-# ─── Keep ──────────────────────────────────────────────────────────────────
+# ─── Tablero (Keep) ────────────────────────────────────────────────────────
 
 @app.get("/api/keep/cards")
 def keep_list_cards():
     return keep.list_cards()
+
+
+class ImportPlanRequest(BaseModel):
+    text: str
+
+@app.post("/api/keep/import")
+def keep_import_plan(req: ImportPlanRequest):
+    cards = keep.import_plan_cards(req.text)
+    return {"ok": True, "count": len(cards), "cards": cards}
+
+
+@app.post("/api/keep/scan")
+def keep_scan_plans():
+    count = keep.scan_plans_folder()
+    return {"ok": True, "count": count}
 
 
 class CreateCardRequest(BaseModel):
@@ -543,7 +646,7 @@ if _dist.exists() and _index.exists():
 
     # SPA fallback — must be defined LAST so API routes take priority
     @app.get("/{full_path:path}")
-    def serve_spa(full_path: str):
+    def serve_spa(full_path: str, _: None = Depends(require_auth)):
         """Serve index.html for all non-API routes (SPA client-side routing)."""
         return FileResponse(str(_index))
 else:

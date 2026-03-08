@@ -130,5 +130,24 @@ def main():
             print("[Melete] Shutting down.")
 
 
+def set_password(pw: str):
+    """Save a mobile access password to melete_settings.json."""
+    import json
+    data = {}
+    if SETTINGS_FILE.exists():
+        try:
+            data = json.loads(SETTINGS_FILE.read_text())
+        except Exception:
+            pass
+    data["password"] = pw
+    SETTINGS_FILE.write_text(json.dumps(data, indent=2))
+    print(f"[Melete] Password set. Access with user 'melete' and your password.")
+
+
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) == 3 and sys.argv[1] == "--set-password":
+        from pathlib import Path
+        SETTINGS_FILE = Path(__file__).parent / "melete_settings.json"
+        set_password(sys.argv[2])
+    else:
+        main()

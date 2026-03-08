@@ -83,12 +83,16 @@ def list_documents() -> list:
             result.append({
                 "path": rel,
                 "name": f.stem,
+                "title": m.get("title", ""),
                 "ext": f.suffix.lower().lstrip("."),
                 "status": m.get("status", "unread"),
                 "progress": m.get("progress", 0),
                 "favorite": m.get("favorite", False),
                 "author": m.get("author", ""),
-                "year": m.get("year", ""),
+                "year": str(m.get("year", "")) if m.get("year") else "",
+                "pages": m.get("pages", 0),
+                "language": m.get("language", ""),
+                "publisher": m.get("publisher", ""),
                 "collections": m.get("collections", []),
                 "last_opened": m.get("last_opened", ""),
                 "total_read_seconds": m.get("total_read_seconds", 0),
@@ -143,6 +147,43 @@ def extract_pdf_text(rel: str, page: int) -> str:
         return ""
     except Exception as e:
         return f"Error: {e}"
+
+
+def search_pdf_text(rel: str, query: str) -> list:
+    """Search all pages of a PDF for query. Returns [{page, ctx}]."""
+    if not query.strip():
+        return []
+    q = query.lower()
+    results = []
+    try:
+        import fitz
+        doc = fitz.open(str(_pdf_path(rel)))
+        for page_num in range(doc.page_count):
+            text = doc[page_num].get_text()
+            start = 0
+            while True:
+                idx = text.lower().find(q, start)
+                if idx == -1:
+                    break
+                ctx = text[max(0, idx - 60):idx + 120].replace('\n', ' ').strip()
+                results.append({"page": page_num, "ctx": ctx})
+                start = idx + 1
+                if len(results) >= 200:
+                    return results
+    except Exception:
+        pass
+    return results
+
+
+def get_pdf_outline(rel: str) -> list:
+    """Return the PDF's table of contents as a list of {level, title, page}."""
+    try:
+        import fitz
+        doc = fitz.open(str(_pdf_path(rel)))
+        toc = doc.get_toc()  # [(level, title, page_1indexed), ...]
+        return [{"level": t[0], "title": t[1], "page": max(0, t[2] - 1)} for t in toc]
+    except Exception:
+        return []
 
 
 # ─── EPUB ──────────────────────────────────────────────────────────────────
@@ -392,6 +433,44 @@ def search_notes(query: str) -> list:
             ctx = content[max(0, idx - 40):idx + 80].replace("\n", " ") if idx >= 0 else ""
             results.append({"name": name, "ctx": ctx})
     return results
+
+
+def global_search(query: str, paths: list) -> dict:
+    """Search notes + specific document files. Returns {notes, docs}."""
+    if not query.strip():
+        return {"notes": [], "docs": []}
+    q = query.lower()
+    # Notes search
+    notes = search_notes(query)
+    # Document content search (only requested files, max 10)
+    docs = []
+    for rel in paths[:10]:
+        try:
+            fp = _vault() / "Files" / rel
+            if rel.endswith(".pdf"):
+                import fitz
+                doc = fitz.open(str(fp))
+                for page_num in range(min(doc.page_count, 500)):
+                    text = doc[page_num].get_text()
+                    if q in text.lower():
+                        idx = text.lower().find(q)
+                        ctx = text[max(0, idx - 60):idx + 120].replace("\n", " ")
+                        docs.append({"path": rel, "type": "pdf", "page": page_num, "ctx": ctx})
+                        if len(docs) >= 50:
+                            return {"notes": notes, "docs": docs}
+            elif rel.endswith(".epub"):
+                chapters = load_epub(rel)
+                for ch_idx, ch in enumerate(chapters):
+                    text = " ".join(b["text"] for b in ch.get("blocks", []))
+                    if q in text.lower():
+                        idx = text.lower().find(q)
+                        ctx = text[max(0, idx - 60):idx + 120]
+                        docs.append({"path": rel, "type": "epub", "chapter": ch_idx, "title": ch.get("title", ""), "ctx": ctx})
+                        if len(docs) >= 50:
+                            return {"notes": notes, "docs": docs}
+        except Exception:
+            pass
+    return {"notes": notes, "docs": docs}
 
 
 def parse_wikilinks(text: str) -> list:
