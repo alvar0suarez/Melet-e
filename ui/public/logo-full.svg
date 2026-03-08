@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 80" width="260" height="80">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#2dd4bf"/>
+    </linearGradient>
+    <linearGradient id="tg" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#c7d2fe"/>
+      <stop offset="100%" stop-color="#99f6e4"/>
+    </linearGradient>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a1f35"/>
+      <stop offset="100%" stop-color="#0d1a18"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="softglow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Icon background -->
+  <rect x="0" y="0" width="80" height="80" rx="18" fill="url(#bg)"/>
+  <rect x="0" y="0" width="80" height="80" rx="18" fill="none"
+        stroke="url(#g)" stroke-width="1" opacity="0.3"/>
+
+  <!-- Star -->
+  <g filter="url(#softglow)">
+    <path d="M40 9 L41.8 15.4 L48.5 15.4 L43.2 19.4 L45.1 25.8 L40 21.8 L34.9 25.8 L36.8 19.4 L31.5 15.4 L38.2 15.4 Z"
+          fill="url(#g)" opacity="0.95"/>
+  </g>
+
+  <!-- M -->
+  <g filter="url(#glow)">
+    <path d="M10 62 L10 34 L40 51 L70 34 L70 62"
+          fill="none"
+          stroke="url(#g)"
+          stroke-width="7.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"/>
+  </g>
+
+  <!-- Baseline -->
+  <line x1="10" y1="67" x2="70" y2="67"
+        stroke="url(#g)" stroke-width="1.2"
+        stroke-linecap="round" opacity="0.3"/>
+
+  <!-- Wordmark: MELETE -->
+  <text x="98" y="44"
+        font-family="'Georgia', 'Palatino', serif"
+        font-size="30"
+        font-weight="700"
+        letter-spacing="3"
+        fill="url(#tg)">MELETE</text>
+
+  <!-- Subtitle: greek tagline -->
+  <text x="99" y="62"
+        font-family="'Georgia', 'Palatino', serif"
+        font-size="10.5"
+        letter-spacing="2.5"
+        fill="#6e7681">μελέτη  ·  knowledge</text>
+</svg>

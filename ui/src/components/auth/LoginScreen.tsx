@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Eye, EyeOff, BookOpen } from 'lucide-react'
+import { Eye, EyeOff } from 'lucide-react'
 import { checkAuth, setupAuth, loginAuth } from '@/lib/api'
 
 interface Props {
@@ -56,31 +56,17 @@ export default function LoginScreen({ onAuthenticated }: Props) {
       style={{ background: 'linear-gradient(160deg, #0d1117 0%, #10151f 60%, #0d1117 100%)' }}
     >
       {/* Logo */}
-      <div className="flex flex-col items-center gap-4">
-        <div
-          className="w-20 h-20 rounded-3xl flex items-center justify-center"
-          style={{
-            background: 'linear-gradient(135deg, #4f46e5, #0d9488)',
-            boxShadow: '0 12px 48px rgba(79,70,229,0.35)',
-          }}
-        >
-          <BookOpen size={36} color="#fff" strokeWidth={1.5} />
-        </div>
-        <div className="text-center">
-          <h1
-            className="text-3xl font-black tracking-tight"
-            style={{
-              background: 'linear-gradient(135deg, var(--indigo), var(--teal))',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-            }}
-          >
-            Melete
-          </h1>
-          <p className="text-xs mt-1.5 tracking-wide" style={{ color: 'var(--text3)' }}>
-            {mode === 'setup' ? 'Crea tu contraseña de acceso' : 'Tu biblioteca personal de conocimiento'}
-          </p>
-        </div>
+      <div className="flex flex-col items-center gap-3">
+        <img
+          src="/logo.svg"
+          alt="Melete"
+          width={96}
+          height={96}
+          style={{ borderRadius: 24, boxShadow: '0 12px 48px rgba(129,140,248,0.3)' }}
+        />
+        <p className="text-xs mt-1 tracking-widest uppercase" style={{ color: 'var(--text3)' }}>
+          {mode === 'setup' ? 'Crea tu contraseña de acceso' : 'μελέτη · knowledge'}
+        </p>
       </div>
 
       {/* Form */}
