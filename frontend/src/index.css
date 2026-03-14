@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+/* ── Melete color palette ─────────────────────────────────── */
+:root {
+  --color-bg: #0d1117;
+  --color-bg2: #161b22;
+  --color-bg3: #21262d;
+  --color-text: #e6edf3;
+  --color-text2: #8b949e;
+  --color-indigo: #818cf8;
+  --color-teal: #2dd4bf;
+  --color-green: #3fb950;
+  --color-red: #f85149;
+
+  /* shadcn/ui CSS variables (dark theme) */
+  --background: 215 28% 7%;
+  --foreground: 213 31% 91%;
+  --card: 215 25% 11%;
+  --card-foreground: 213 31% 91%;
+  --popover: 215 25% 11%;
+  --popover-foreground: 213 31% 91%;
+  --primary: 234 89% 74%;
+  --primary-foreground: 215 28% 7%;
+  --secondary: 215 20% 17%;
+  --secondary-foreground: 213 31% 91%;
+  --muted: 215 20% 17%;
+  --muted-foreground: 217 10% 60%;
+  --accent: 175 84% 51%;
+  --accent-foreground: 215 28% 7%;
+  --destructive: 4 74% 63%;
+  --destructive-foreground: 213 31% 91%;
+  --border: 215 20% 20%;
+  --input: 215 20% 20%;
+  --ring: 234 89% 74%;
+  --radius: 0.5rem;
+}
+
+/* ── Base reset ───────────────────────────────────────────── */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+}

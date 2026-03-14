@@ -1,0 +1,12 @@
+{
+  "name": "melete-electron",
+  "version": "0.1.0",
+  "description": "Melete PKM — Electron shell",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}
