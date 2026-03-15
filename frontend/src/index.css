@@ -52,3 +52,62 @@ body {
 #root {
   min-height: 100vh;
 }
+
+/* ── TipTap editor content ────────────────────────────────── */
+.note-prose {
+  @apply outline-none min-h-64;
+  font-family: Georgia, "Times New Roman", serif;
+  line-height: 1.8;
+  color: var(--color-text);
+}
+
+.note-prose h1 {
+  @apply text-3xl font-bold mt-6 mb-3;
+}
+.note-prose h2 {
+  @apply text-2xl font-bold mt-5 mb-2;
+}
+.note-prose h3 {
+  @apply text-xl font-semibold mt-4 mb-2;
+}
+.note-prose p {
+  @apply mb-3;
+}
+.note-prose strong {
+  @apply font-bold;
+  color: var(--color-text);
+}
+.note-prose em {
+  @apply italic;
+}
+.note-prose ul {
+  @apply list-disc pl-6 mb-3;
+}
+.note-prose ol {
+  @apply list-decimal pl-6 mb-3;
+}
+.note-prose li {
+  @apply mb-1;
+}
+.note-prose blockquote {
+  @apply border-l-4 pl-4 italic my-3;
+  border-color: var(--color-bg3);
+  color: var(--color-text2);
+}
+.note-prose code {
+  @apply rounded px-1 py-0.5 font-mono text-sm;
+  background-color: var(--color-bg3);
+  color: var(--color-teal);
+}
+.note-prose pre {
+  @apply rounded p-4 mb-3 overflow-x-auto;
+  background-color: var(--color-bg2);
+}
+.note-prose pre code {
+  @apply bg-transparent p-0;
+  color: var(--color-text);
+}
+.note-prose hr {
+  @apply my-6;
+  border-color: var(--color-bg3);
+}
